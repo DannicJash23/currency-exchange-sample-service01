@@ -1,0 +1,13 @@
+Cluster Endpoint (Writer Endpoint)
+Write Operations: The cluster endpoint directs all write operations to the primary instance in the Aurora cluster. This primary instance is the only one that can handle write operations.
+
+Read Operations: The cluster endpoint can also handle read operations. However, to optimize performance, read operations are usually distributed among multiple reader instances in the cluster.
+
+Benefits of Using Cluster Endpoint for Read/Write
+Automatic Failover: If the primary instance fails, Aurora automatically promotes one of the read replicas to be the new primary. The cluster endpoint dynamically points to the new primary instance, ensuring high availability.
+
+Simplified Connection Management: Using the cluster endpoint for both read and write operations simplifies connection management since your application only needs to be aware of one endpoint.
+
+Consistency and Integrity: All write operations go to the primary instance, ensuring data consistency and integrity across the cluster.
+
+Using the Aurora cluster endpoint simplifies the process of managing read and write operations, while ensuring high availability and automatic failover, which is critical for mission-critical applications.
