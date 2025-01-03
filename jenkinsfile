@@ -1,0 +1,142 @@
+pipeline {
+    agent any
+    
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+    
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        AWS_REGION = 'us-west-2'
+        ECR_URI = '123456789012.dkr.ecr.us-west-2.amazonaws.com/currency-exchange-sample-service01'
+        CREDENTIALS_ID = 'aws-ecr-credentials'
+        TRIVY_IMAGE = 'aquasec/trivy:latest'
+        ECR_REPO = 'currency-exchange-sample-service01'
+        IMAGE_TAG = 'latest'
+        PROD_NAMESPACE = 'prod'
+    }
+    
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', changelog: false, poll: false, url: 'https://github.com/DannicJash23/currency-exchange-sample-service01.git'
+            }
+        }
+        
+        stage('Compile') {
+            steps {
+                sh "mvn compile"
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                sh "mvn test"
+            }
+        }
+        
+        stage('Trivy Scan File System') {
+            steps {
+                sh "trivy fs --format table -o trivy-fs-report.html ."
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                    sh """
+                    $SCANNER_HOME/bin/sonar-scanner \
+                    -Dsonar.projectKey=currency-exchange-sample-service01 \
+                    -Dsonar.projectName=currency-exchange-sample-service01 \
+                    -Dsonar.java.binaries=.
+                    """
+                }
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                sh "mvn package -DskipTests=true"
+            }
+        }
+        
+        stage('Login to AWS ECR') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: CREDENTIALS_ID]]) {
+                    sh """
+                    aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
+                    aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
+                    aws configure set default.region ${AWS_REGION}
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URI}
+                    """
+                }
+            }
+        }
+        
+        stage('Build & Tag Docker Image') {
+            steps {
+                sh """
+                docker build -t ${ECR_REPO}:${IMAGE_TAG} .
+                docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_URI}:${IMAGE_TAG}
+                """
+            }
+        }
+        
+        stage('Trivy Scan Image') {
+            steps {
+                sh "trivy image --format table -o trivy-image-report.html ${ECR_URI}:${IMAGE_TAG}"
+            }
+        }
+        
+        stage('Publish Docker Image') {
+            steps {
+                sh "docker push ${ECR_URI}:${IMAGE_TAG}"
+            }
+        }
+        
+        stage('Deploy to Kubernetes - Dev') {
+            steps {
+                script {
+                    deployToNamespace('dev', "${ECR_URI}:${IMAGE_TAG}")
+                }
+            }
+        }
+        
+        stage('Prod Deployment Approval') {
+            steps {
+                input message: "Approve deployment to PROD?", ok: "Deploy"
+                script {
+                    deployToNamespace(PROD_NAMESPACE, "${ECR_URI}:${IMAGE_TAG}")
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            emailext to: 'team@example.com',
+                    subject: "Pipeline ${currentBuild.fullDisplayName}",
+                    body: "${currentBuild.fullDisplayName} finished with status: ${currentBuild.result}"
+        }
+        failure {
+            script {
+                def message = "Pipeline failed at stage ${currentBuild.currentResult}"
+                snsNotify(message)
+            }
+        }
+    }
+}
+
+def deployToNamespace(namespace, image) {
+    sh """
+    kubectl set image deployment/webapp webapp=${image} -n ${namespace} --record
+    kubectl rollout status deployment/webapp -n ${namespace}
+    """
+}
+
+def snsNotify(message) {
+    sh """
+    aws sns publish --topic-arn arn:aws:sns:${AWS_REGION}:<account-id>:<topic-name> --message '${message}'
+    """
+}
