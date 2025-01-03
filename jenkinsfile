@@ -8,12 +8,14 @@ pipeline {
     
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        AWS_REGION = 'us-west-2'
-        ECR_URI = '123456789012.dkr.ecr.us-west-2.amazonaws.com/currency-exchange-sample-service01'
+        AWS_REGION = 'ap-south-1'
+        ECR_URI = '343369923539.dkr.ecr.ap-south-1.amazonaws.com/currency-exchange-sample-service01'
         CREDENTIALS_ID = 'aws-ecr-credentials'
         TRIVY_IMAGE = 'aquasec/trivy:latest'
         ECR_REPO = 'currency-exchange-sample-service01'
         IMAGE_TAG = 'latest'
+        DEV_NAMESPACE = 'dev'
+        QA_NAMESPACE = 'qa'
         PROD_NAMESPACE = 'prod'
     }
     
@@ -98,7 +100,15 @@ pipeline {
         stage('Deploy to Kubernetes - Dev') {
             steps {
                 script {
-                    deployToNamespace('dev', "${ECR_URI}:${IMAGE_TAG}")
+                    deployToNamespace(DEV_NAMESPACE, "${ECR_URI}:${IMAGE_TAG}")
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes - QA') {
+            steps {
+                script {
+                    deployToNamespace(QA_NAMESPACE, "${ECR_URI}:${IMAGE_TAG}")
                 }
             }
         }
@@ -130,8 +140,8 @@ pipeline {
 
 def deployToNamespace(namespace, image) {
     sh """
-    kubectl set image deployment/webapp webapp=${image} -n ${namespace} --record
-    kubectl rollout status deployment/webapp -n ${namespace}
+    kubectl set image deployment/webapps webapps=${image} -n ${namespace} --record
+    kubectl rollout status deployment/webapps -n ${namespace}
     """
 }
 
